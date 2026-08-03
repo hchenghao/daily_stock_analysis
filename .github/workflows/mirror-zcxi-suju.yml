@@ -1,0 +1,193 @@
+name: Mirror zcxi suju dataset to Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/mirror-zcxi-suju.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-zcxi-suju
+  cancel-in-progress: false
+
+env:
+  DATASET_REPO: zcxi/suju
+  DATASET_FILE: merged_stock.parquet
+  DATASET_URL: https://huggingface.co/datasets/zcxi/suju/resolve/main/merged_stock.parquet?download=true
+  EXPECTED_SHA256: 8d93f3e15d5ad5931776a5e313493103b82fe0ca74d50b116ed399530433e622
+  RELEASE_TAG: dataset-zcxi-suju-2026-02-02
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download canonical dataset file
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          curl \
+            --fail \
+            --location \
+            --retry 8 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --continue-at - \
+            --output "release-assets/${DATASET_FILE}" \
+            "${DATASET_URL}"
+
+          ls -lh "release-assets/${DATASET_FILE}"
+
+      - name: Verify SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${EXPECTED_SHA256}  release-assets/${DATASET_FILE}" \
+            | sha256sum --check -
+
+          sha256sum "release-assets/${DATASET_FILE}" \
+            > release-assets/SHA256SUMS.txt
+
+      - name: Validate Parquet metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet duckdb
+
+          python <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import duckdb
+
+          path = Path("release-assets/merged_stock.parquet")
+          expected_columns = [
+              "Date", "Open", "High", "Low",
+              "Close", "Amount", "Vol", "StockCode",
+          ]
+
+          con = duckdb.connect()
+          schema_rows = con.execute(
+              "DESCRIBE SELECT * FROM read_parquet(?)",
+              [str(path)],
+          ).fetchall()
+          columns = [row[0] for row in schema_rows]
+
+          missing = sorted(set(expected_columns) - set(columns))
+          if missing:
+              raise SystemExit(f"Missing expected columns: {missing}")
+
+          row_count, code_count, min_date, max_date = con.execute(
+              """
+              SELECT
+                  COUNT(*) AS row_count,
+                  COUNT(DISTINCT StockCode) AS code_count,
+                  MIN(Date) AS min_date,
+                  MAX(Date) AS max_date
+              FROM read_parquet(?)
+              """,
+              [str(path)],
+          ).fetchone()
+
+          expected = {
+              "row_count": 8_327_981,
+              "code_count": 8_827,
+              "min_date": "2021-08-02",
+              "max_date": "2026-02-02",
+          }
+          actual = {
+              "row_count": int(row_count),
+              "code_count": int(code_count),
+              "min_date": str(min_date)[:10],
+              "max_date": str(max_date)[:10],
+          }
+
+          if actual != expected:
+              raise SystemExit(
+                  "Dataset metadata does not match the canonical dataset card.\n"
+                  f"Expected: {expected}\nActual: {actual}"
+              )
+
+          manifest = {
+              "source": "https://huggingface.co/datasets/zcxi/suju",
+              "source_file": "merged_stock.parquet",
+              "license": "CC-BY-4.0",
+              "attribution": "zcxi",
+              "sha256": os.environ["EXPECTED_SHA256"],
+              "size_bytes": path.stat().st_size,
+              "columns": columns,
+              **actual,
+          }
+
+          Path("release-assets/MANIFEST.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Create source and license note
+        shell: bash
+        run: |
+          cat > release-assets/SOURCE_AND_LICENSE.md <<'EOF'
+          # Source and license
+
+          - Dataset: zcxi/suju
+          - Source: https://huggingface.co/datasets/zcxi/suju
+          - Canonical file: merged_stock.parquet
+          - Maintainer / attribution: zcxi
+          - License: CC BY 4.0
+          - Date range: 2021-08-02 to 2026-02-02
+          - Expected rows: 8,327,981
+          - Expected stock codes: 8,827
+
+          This repository mirrors the canonical file for reproducible quantitative
+          research. It does not claim ownership of the original dataset.
+
+          The Hugging Face repository contains multiple historical/experimental
+          Parquet versions. This release intentionally mirrors only the canonical
+          file named in the dataset card to avoid duplicate rows and version mixing.
+          EOF
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NOTES_FILE="release-assets/SOURCE_AND_LICENSE.md"
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" \
+              release-assets/merged_stock.parquet \
+              release-assets/MANIFEST.json \
+              release-assets/SHA256SUMS.txt \
+              release-assets/SOURCE_AND_LICENSE.md \
+              --clobber
+          else
+            gh release create "${RELEASE_TAG}" \
+              release-assets/merged_stock.parquet \
+              release-assets/MANIFEST.json \
+              release-assets/SHA256SUMS.txt \
+              release-assets/SOURCE_AND_LICENSE.md \
+              --title "zcxi/suju A-share daily dataset (2026-02-02)" \
+              --notes-file "${NOTES_FILE}"
+          fi
+
+      - name: Print Release URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "${RELEASE_TAG}" --json url -q .url
