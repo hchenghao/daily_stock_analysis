@@ -631,6 +631,7 @@ jobs:
         run: |
           mkdir -p data
           gh release download "${{ env.DATASET_RELEASE_TAG }}" \
+            --repo "${{ github.repository }}" \
             --pattern "${{ env.DATASET_FILE }}" \
             --dir data \
             --clobber
@@ -681,6 +682,7 @@ jobs:
         working-directory: ${{ runner.temp }}/factor-v4
         run: |
           gh release create "${{ env.RELEASE_TAG }}" \
+            --repo "${{ github.repository }}" \
             outputs/v4/A股主板因子v4_结果包.zip \
             outputs/v4/A股主板因子v4_严格验证报告.html \
             outputs/v4/A股主板因子v4_严格验证报告.md \
