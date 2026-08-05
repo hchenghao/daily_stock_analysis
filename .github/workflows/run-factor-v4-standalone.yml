@@ -35,9 +35,9 @@ jobs:
 
       - name: Materialize validated v4 source bundle
         run: |
-          rm -rf "${{ runner.temp }}/factor-v4"
-          mkdir -p "${{ runner.temp }}/factor-v4"
-          cat <<'B64' | base64 --decode > "${{ runner.temp }}/factor-v4.zip"
+          rm -rf "$RUNNER_TEMP/factor-v4"
+          mkdir -p "$RUNNER_TEMP/factor-v4"
+          cat <<'B64' | base64 --decode > "$RUNNER_TEMP/factor-v4.zip"
           UEsDBBQAAAAIAOGKBF2VjO5H5QcAAGMNAAAJAAAAUkVBRE1FLm1kdVZbU1pZFn7nV5yqvKWqRY3J
           e7SrJ3mZmkrPSz/BUUnLBMUGNJN5AhNucvWKEUQworQEUGO4HQz/Zfrsvc95yl+Yb58FyEzXWEUJ
           5+y91rfW+ta31iPlubFV1jsaPxmY0YyutVm+xOpZZXPue/+YH1zzVMPo1XTtXh802HlK76T1ToWX
@@ -595,39 +595,39 @@ jobs:
           BgUAABQAAAAAAAAAAAAAAKSBPXUAAHRlc3RzL3Rlc3RfcmVwYWlyLnB5UEsFBgAAAAAQABAADgQA
           AHZ3AAAAAA==
           B64
-          unzip -q "${{ runner.temp }}/factor-v4.zip" -d "${{ runner.temp }}/factor-v4"
+          unzip -q "$RUNNER_TEMP/factor-v4.zip" -d "$RUNNER_TEMP/factor-v4"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: ${{ runner.temp }}/factor-v4/requirements-v4.txt
+          cache-dependency-path: $RUNNER_TEMP/factor-v4/requirements-v4.txt
 
       - name: Restore BaoStock cache
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/factor-v4/cache/baostock
+          path: $RUNNER_TEMP/factor-v4/cache/baostock
           key: baostock-v4-${{ inputs.start_date }}-${{ inputs.end_date }}-standalone-v2
           restore-keys: |
             baostock-v4-${{ inputs.start_date }}-${{ inputs.end_date }}-
             baostock-v4-
 
       - name: Install dependencies
-        working-directory: ${{ runner.temp }}/factor-v4
+        working-directory: $RUNNER_TEMP/factor-v4
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-v4.txt
           python -m pip install -e .
 
       - name: Run unit tests
-        working-directory: ${{ runner.temp }}/factor-v4
+        working-directory: $RUNNER_TEMP/factor-v4
         run: python -m pytest
 
       - name: Download and verify original Release dataset
         env:
           GH_TOKEN: ${{ github.token }}
-        working-directory: ${{ runner.temp }}/factor-v4
+        working-directory: $RUNNER_TEMP/factor-v4
         run: |
           mkdir -p data
           gh release download "${{ env.DATASET_RELEASE_TAG }}" \
@@ -637,7 +637,7 @@ jobs:
           echo "${{ env.DATASET_SHA256 }}  data/${{ env.DATASET_FILE }}" | sha256sum --check -
 
       - name: Repair data and run strict validation
-        working-directory: ${{ runner.temp }}/factor-v4
+        working-directory: $RUNNER_TEMP/factor-v4
         run: |
           python run_pipeline.py \
             --start "${{ inputs.start_date }}" \
@@ -646,7 +646,7 @@ jobs:
             --output outputs/v4
 
       - name: Build curated result bundle
-        working-directory: ${{ runner.temp }}/factor-v4
+        working-directory: $RUNNER_TEMP/factor-v4
         run: |
           python - <<'PY2'
           from pathlib import Path
@@ -667,18 +667,18 @@ jobs:
         with:
           name: astock-factor-v4-${{ github.run_number }}
           path: |
-            ${{ runner.temp }}/factor-v4/outputs/v4/A股主板因子v4_结果包.zip
-            ${{ runner.temp }}/factor-v4/outputs/v4/A股主板因子v4_严格验证报告.html
-            ${{ runner.temp }}/factor-v4/outputs/v4/A股主板因子v4_严格验证报告.md
-            ${{ runner.temp }}/factor-v4/outputs/v4/A股主板因子v4_可复现结果.ipynb
-            ${{ runner.temp }}/factor-v4/outputs/v4/repaired_mainboard_panel.parquet
+            $RUNNER_TEMP/factor-v4/outputs/v4/A股主板因子v4_结果包.zip
+            $RUNNER_TEMP/factor-v4/outputs/v4/A股主板因子v4_严格验证报告.html
+            $RUNNER_TEMP/factor-v4/outputs/v4/A股主板因子v4_严格验证报告.md
+            $RUNNER_TEMP/factor-v4/outputs/v4/A股主板因子v4_可复现结果.ipynb
+            $RUNNER_TEMP/factor-v4/outputs/v4/repaired_mainboard_panel.parquet
           retention-days: 90
 
       - name: Publish validation Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: factor-v4-${{ github.run_id }}
-        working-directory: ${{ runner.temp }}/factor-v4
+        working-directory: $RUNNER_TEMP/factor-v4
         run: |
           gh release create "${{ env.RELEASE_TAG }}" \
             outputs/v4/A股主板因子v4_结果包.zip \
